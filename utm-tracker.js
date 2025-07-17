@@ -9,6 +9,7 @@
  * - Automatic UTM parameter capture from URL
  * - Session management with 30-minute timeout
  * - Link decoration for attribution tracking
+ * - Form field population with UTM parameters
  * - Dynamic content support (SPAs, AJAX-loaded content)
  * - Error handling and fallbacks
  * - Page view counting
@@ -35,6 +36,13 @@
  * - Prevents duplicate decoration of already decorated links
  * - Works with dynamically loaded content via MutationObserver
  * 
+ * FORM FIELD POPULATION:
+ * - Automatically populates UTM parameters into form fields with matching IDs
+ * - Supports input, textarea, and select elements
+ * - Handles multiple elements with the same ID on the same page
+ * - Works with dynamically loaded content via MutationObserver
+ * - Ensures UTM data is sent to backend on form submission
+ * 
  * STORAGE:
  * - Uses localStorage with key 'lmv_tracking'
  * - Stores session data, UTM parameters, and page view count
@@ -46,7 +54,8 @@
  * 1. Extract UTM parameters from the current page URL
  * 2. Create or continue a user session
  * 3. Decorate all relevant links with tracking parameters
- * 4. Monitor for new links added dynamically
+ * 4. Populate UTM parameters into form fields with matching IDs
+ * 5. Monitor for new links and form fields added dynamically
  * 
  * DEBUGGING:
  * In development environments (localhost or dev domains), the script exposes:
@@ -58,7 +67,8 @@
  * 1. Set window.lmvDebugMode = true (enables debug mode)
  * 2. Call window.lmvDebug() to log current state
  * 3. Call window.lmvDebugLinks() to show decorated links
- * 4. Call window.lmvDebugStorage() to show storage contents
+ * 4. Call window.lmvDebugUTMFields() to show UTM form fields
+ * 5. Call window.lmvDebugStorage() to show storage contents
  * 
  * BROWSER SUPPORT:
  * - Modern browsers with localStorage and URLSearchParams
@@ -225,6 +235,55 @@
         return decoratedCount;
       }, 0);
     }
+
+    // Populate UTM parameters into form fields with matching IDs
+    function populateUTMFields() {
+      return safeExecute(() => {
+        let populatedCount = 0;
+        
+        UTM_FIELDS.forEach(param => {
+          if (trackingData[param]) {
+            // Find all elements with the UTM parameter as ID
+            const elements = document.querySelectorAll(`#${param}`);
+            
+            elements.forEach(element => {
+              try {
+                // Handle different input types
+                if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
+                  if (element.type === 'hidden' || element.type === 'text' || element.type === '') {
+                    element.value = trackingData[param];
+                    populatedCount++;
+                    logDebug(`Populated ${param} field`, { 
+                      elementType: element.tagName, 
+                      elementId: element.id, 
+                      value: trackingData[param] 
+                    });
+                  }
+                } else if (element.tagName === 'SELECT') {
+                  // For select elements, try to find and select the option with matching value
+                  const option = Array.from(element.options).find(opt => 
+                    opt.value === trackingData[param] || opt.textContent === trackingData[param]
+                  );
+                  if (option) {
+                    element.value = option.value;
+                    populatedCount++;
+                    logDebug(`Populated ${param} select field`, { 
+                      elementId: element.id, 
+                      selectedValue: option.value 
+                    });
+                  }
+                }
+              } catch (error) {
+                console.warn(`Failed to populate ${param} field:`, element, error);
+              }
+            });
+          }
+        });
+        
+        logDebug(`Populated ${populatedCount} UTM fields`);
+        return populatedCount;
+      }, 0);
+    }
   
     // Handle dynamic content (SPAs, AJAX-loaded content)
     function observeDOMChanges() {
@@ -232,6 +291,7 @@
       
       const observer = new MutationObserver((mutations) => {
         let shouldDecorate = false;
+        let shouldPopulate = false;
         
         mutations.forEach((mutation) => {
           if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
@@ -242,17 +302,30 @@
                   shouldDecorate = true;
                   logDebug('New links detected in DOM', { count: links.length });
                 }
+                
+                // Check for new UTM form fields
+                const utmFields = node.querySelectorAll ? node.querySelectorAll(UTM_FIELDS.map(field => `#${field}`).join(',')) : [];
+                if (utmFields.length > 0) {
+                  shouldPopulate = true;
+                  logDebug('New UTM form fields detected in DOM', { count: utmFields.length });
+                }
               }
             });
           }
         });
         
-        if (shouldDecorate) {
+        if (shouldDecorate || shouldPopulate) {
           // Debounce to avoid excessive calls
           clearTimeout(window.utmTrackerTimeout);
           window.utmTrackerTimeout = setTimeout(() => {
-            const count = decorateLinks();
-            logDebug('Decorated links after DOM change', { count });
+            if (shouldDecorate) {
+              const count = decorateLinks();
+              logDebug('Decorated links after DOM change', { count });
+            }
+            if (shouldPopulate) {
+              const count = populateUTMFields();
+              logDebug('Populated UTM fields after DOM change', { count });
+            }
           }, 100);
         }
       });
@@ -290,6 +363,23 @@
       console.log(`Total links found: ${links.length}`);
       console.groupEnd();
     }
+
+    function debugUTMFields() {
+      console.group('📝 UTM Form Fields');
+      UTM_FIELDS.forEach(param => {
+        const elements = document.querySelectorAll(`#${param}`);
+        console.log(`${param}:`, {
+          count: elements.length,
+          elements: Array.from(elements).map(el => ({
+            tagName: el.tagName,
+            type: el.type || 'N/A',
+            value: el.value || 'N/A',
+            hasValue: !!el.value
+          }))
+        });
+      });
+      console.groupEnd();
+    }
   
     function debugStorage() {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -302,18 +392,21 @@
   
     // Initialize
     const decoratedCount = decorateLinks();
+    const populatedCount = populateUTMFields();
     observeDOMChanges();
     
     // Expose tracking data and debug functions
     window.lmvTrackingData = trackingData;
     window.lmvDebug = debugCurrentState;
     window.lmvDebugLinks = debugDecoratedLinks;
+    window.lmvDebugUTMFields = debugUTMFields;
     window.lmvDebugStorage = debugStorage;
     
     // Initial debug log
     logDebug('UTM Tracker initialized', {
       sessionId: trackingData.session_id,
       decoratedLinks: decoratedCount,
+      populatedUTMFields: populatedCount,
       utmParams: utms,
       debugMode: window.lmvDebugMode
     });
