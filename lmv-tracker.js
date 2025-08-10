@@ -62,6 +62,7 @@
  * window.lmvTrackerConfig = {
  *   apiBaseUrl: 'https://app.lamainverte.ca/api/v1', // Default API base URL
  *   targetDomain: 'app.lamainverte.ca',              // Default target domain for link decoration
+ *   paymentDomain: 'paiement.lamainverte.ca',        // Payment links domain to attach client_reference_id
  *   sessionTimeout: 30,                              // Session timeout in minutes (default: 30)
  *   enablePageViewTracking: true,                    // Enable/disable page view API calls (default: true)
  *   enableLinkDecoration: true,                      // Enable/disable link decoration (default: true)
@@ -133,6 +134,7 @@
     const config = Object.assign({
         apiBaseUrl: 'https://app.lamainverte.ca/api/v1',
         targetDomain: 'app.lamainverte.ca',
+        paymentDomain: 'paiement.lamainverte.ca',
         sessionTimeout: 30, // minutes
         enablePageViewTracking: true,
         enableLinkDecoration: true,
@@ -363,30 +365,45 @@
         if (!config.enableLinkDecoration) return 0;
 
         return safeExecute(() => {
-            const links = document.querySelectorAll(`a[href*="${config.targetDomain}"]`);
+            const links = document.querySelectorAll(`a[href*="${config.targetDomain}"], a[href^="https://${config.paymentDomain}"]`);
             let decoratedCount = 0;
             
             links.forEach(link => {
                 try {
                     const url = new URL(link.href);
-                    
-                    // Only decorate if not already decorated
-                    if (!url.searchParams.has('session_id')) {
-                        url.searchParams.set('session_id', trackerData.session_id);
-                        
-                        UTM_FIELDS.forEach(param => {
-                            if (trackerData[param] && !url.searchParams.has(param)) {
-                                url.searchParams.set(param, trackerData[param]);
-                            }
-                        });
-                        
-                        link.href = url.toString();
-                        decoratedCount++;
-                        
-                        logDebug('Decorated link', { 
-                            original: link.href, 
-                            decorated: url.toString() 
-                        });
+                    const isTarget = url.hostname === config.targetDomain;
+                    const isPayment = url.hostname === config.paymentDomain;
+
+                    if (isTarget) {
+                        // Only decorate if not already decorated
+                        if (!url.searchParams.has('session_id')) {
+                            url.searchParams.set('session_id', trackerData.session_id);
+                            
+                            UTM_FIELDS.forEach(param => {
+                                if (trackerData[param] && !url.searchParams.has(param)) {
+                                    url.searchParams.set(param, trackerData[param]);
+                                }
+                            });
+                            
+                            link.href = url.toString();
+                            decoratedCount++;
+                            
+                            logDebug('Decorated app link', { 
+                                original: link.href, 
+                                decorated: url.toString() 
+                            });
+                        }
+                    } else if (isPayment) {
+                        // Set client_reference_id to session_id for payment links
+                        if (!url.searchParams.has('client_reference_id')) {
+                            url.searchParams.set('client_reference_id', trackerData.session_id);
+                            link.href = url.toString();
+                            decoratedCount++;
+                            logDebug('Decorated payment link', {
+                                original: link.href,
+                                decorated: url.toString()
+                            });
+                        }
                     }
                 } catch (error) {
                     console.warn('Failed to decorate link:', link.href, error);
@@ -463,7 +480,7 @@
                         if (node.nodeType === Node.ELEMENT_NODE) {
                             // Check for new links
                             if (config.enableLinkDecoration) {
-                                const links = node.querySelectorAll ? node.querySelectorAll(`a[href*="${config.targetDomain}"]`) : [];
+                                const links = node.querySelectorAll ? node.querySelectorAll(`a[href*="${config.targetDomain}"], a[href^="https://${config.paymentDomain}"]`) : [];
                                 if (links.length > 0) {
                                     shouldDecorate = true;
                                     logDebug('New links detected in DOM', { count: links.length });
