@@ -26,7 +26,7 @@
  * - gclid: Google Ads click identifier
  * 
  * SESSION MANAGEMENT:
- * - Creates unique session IDs for each user session
+ * - Creates unique session UUIDs for each user session
  * - Sessions expire after 30 minutes of inactivity
  * - Preserves UTM data across page views within the same session
  * - Tracks page views per session
@@ -34,7 +34,7 @@
  * - Page view event logging with UTM data
  * 
  * LINK DECORATION:
- * - Automatically appends session_id and UTM parameters to all links
+ * - Automatically appends session UUID and UTM parameters to all links
  * - Only decorates links pointing to app.lamainverte.ca
  * - Prevents duplicate decoration of already decorated links
  * - Works with dynamically loaded content via MutationObserver
@@ -221,7 +221,7 @@
     function isValidTrackerData(data) {
         return data && 
                typeof data === 'object' && 
-               data.session_id && 
+               data.uuid && 
                data.created_at && 
                data.last_updated;
     }
@@ -294,7 +294,7 @@
                     'X-Application-Type': 'web'
                 },
                 body: JSON.stringify({
-                    session_id: sessionData.session_id,
+                    uuid: sessionData.uuid,
                     platform: 'web'
                 })
             });
@@ -318,14 +318,13 @@
 
         try {
             const eventData = {
-                session_id: sessionData.session_id,
+                uuid: sessionData.uuid,
                 event_type: 'view',
                 event_name: 'page',
                 platform: 'web',
                 event_data: {
                     path: path,
                     title: title || document.title,
-                    
                 },
                 // UTM parameters as direct properties (not nested in event_data)
                 ...utmParams,
@@ -334,7 +333,7 @@
                 referrer: document.referrer || null
             };
 
-            const response = await fetch(`${config.apiBaseUrl}/sessions/events`, {
+            const response = await fetch(`${config.apiBaseUrl}/sessions/${sessionData.uuid}/events`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -376,8 +375,8 @@
 
                     if (isTarget) {
                         // Only decorate if not already decorated
-                        if (!url.searchParams.has('session_id')) {
-                            url.searchParams.set('session_id', trackerData.session_id);
+                        if (!url.searchParams.has('uuid')) {
+                            url.searchParams.set('uuid', trackerData.uuid);
                             
                             UTM_FIELDS.forEach(param => {
                                 if (trackerData[param] && !url.searchParams.has(param)) {
@@ -394,9 +393,9 @@
                             });
                         }
                     } else if (isPayment) {
-                        // Set client_reference_id to session_id for payment links
+                        // Set client_reference_id to session UUID for payment links
                         if (!url.searchParams.has('client_reference_id')) {
-                            url.searchParams.set('client_reference_id', trackerData.session_id);
+                            url.searchParams.set('client_reference_id', trackerData.uuid);
                             link.href = url.toString();
                             decoratedCount++;
                             logDebug('Decorated payment link', {
@@ -545,7 +544,7 @@
         // Validate stored data and create new session if needed
         if (!isValidTrackerData(stored) || shouldStartNewSession(stored.last_updated)) {
             trackerData = {
-                session_id: generateUUID(),
+                uuid: generateUUID(),
                 created_at: now,
                 last_updated: now,
                 page_views: 1,
@@ -555,7 +554,7 @@
                 ...utms // Include UTM parameters
             };
             logDebug('Created new session', { 
-                sessionId: trackerData.session_id, 
+                sessionId: trackerData.uuid, 
                 utms: utms,
                 path: currentPath
             });
@@ -574,7 +573,7 @@
             }
             
             logDebug('Continued existing session', { 
-                sessionId: trackerData.session_id, 
+                uuid: trackerData.uuid, 
                 pageViews: trackerData.page_views,
                 path: currentPath
             });
@@ -603,7 +602,7 @@
         window.lmvTrackerData = trackerData;
 
         logDebug('Tracker initialized', {
-            sessionId: trackerData.session_id,
+            uuid: trackerData.uuid,
             decoratedLinks: decoratedCount,
             populatedUTMFields: populatedCount,
             utmParams: utms,
@@ -635,7 +634,7 @@
             console.log(`Link ${index + 1}:`, {
                 text: link.textContent?.trim() || 'No text',
                 href: link.href,
-                hasSessionId: link.href.includes('session_id'),
+                hasSessionUUID: link.href.includes('uuid'),
                 hasUtmParams: UTM_FIELDS.some(param => link.href.includes(param))
             });
         });
@@ -671,7 +670,7 @@
 
     function debugSession() {
         console.group('📊 Session Debug');
-        console.log('Session ID:', trackerData?.session_id);
+        console.log('Session UUID:', trackerData?.uuid);
         console.log('Created At:', trackerData?.created_at ? new Date(trackerData.created_at) : 'N/A');
         console.log('Last Updated:', trackerData?.last_updated ? new Date(trackerData.last_updated) : 'N/A');
         console.log('Page Views:', trackerData?.page_views);
@@ -700,7 +699,7 @@
     
     // Expose tracker methods for manual use
     window.lmvTracker = {
-        getSessionId: () => trackerData?.session_id,
+        getSessionUUID: () => trackerData?.uuid,
         getSessionData: () => trackerData,
         refreshLinks: decorateLinks,
         refreshFields: populateUTMFields,
