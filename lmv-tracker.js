@@ -35,7 +35,7 @@
  * 
  * LINK DECORATION:
  * - Automatically appends session UUID and UTM parameters to all links
- * - Only decorates links pointing to app.lamainverte.ca
+ * - Only decorates links pointing to core.lamainverte.ca
  * - Prevents duplicate decoration of already decorated links
  * - Works with dynamically loaded content via MutationObserver
  * 
@@ -60,8 +60,8 @@
  * You can configure the tracker by setting window.lmvTrackerConfig before including the script:
  * 
  * window.lmvTrackerConfig = {
- *   apiBaseUrl: 'https://app.lamainverte.ca/api/v1', // Default API base URL
- *   targetDomain: 'app.lamainverte.ca',              // Default target domain for link decoration
+ *   apiBaseUrl: 'https://core.lamainverte.ca/api/v1', // Default API base URL
+ *   targetDomain: 'core.lamainverte.ca',              // Default target domain for link decoration
  *   paymentDomain: 'paiement.lamainverte.ca',        // Payment links domain to attach client_reference_id
  *   sessionTimeout: 30,                              // Session timeout in minutes (default: 30)
  *   enablePageViewTracking: true,                    // Enable/disable page view API calls (default: true)
@@ -132,7 +132,7 @@
 (function () {
     // Configuration with defaults
     const config = Object.assign({
-        apiBaseUrl: 'https://app.lamainverte.ca/api/v1',
+        apiBaseUrl: 'https://core.lamainverte.ca/api/v1',
         targetDomain: 'app.lamainverte.ca',
         paymentDomain: 'paiement.lamainverte.ca',
         sessionTimeout: 30, // minutes
