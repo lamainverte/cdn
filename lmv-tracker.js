@@ -4,6 +4,7 @@
  * This script combines UTM tracking and session management into a single, 
  * comprehensive tracking solution. It handles UTM parameter capture, 
  * link decoration, form field population, session management, and page view tracking.
+ * https://cdn.jsdelivr.net/gh/lamainverte/cdn@main/lmv-tracker.js
  * 
  * FEATURES:
  * - Automatic UTM parameter capture from URL
