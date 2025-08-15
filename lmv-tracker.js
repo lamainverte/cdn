@@ -24,6 +24,7 @@
  * - utm_content: Identifies specific content variations
  * - fbclid: Facebook click identifier
  * - gclid: Google Ads click identifier
+ * - fbp: Facebook browser ID from Meta Pixel
  * 
  * SESSION MANAGEMENT:
  * - Creates unique session UUIDs for each user session
@@ -125,7 +126,7 @@
  * - Graceful fallbacks for older browsers
  * - Error handling for missing APIs
  * 
- * @version 3.0.0
+ * @version 3.1.0
  * @author La Main Verte
  */
 
@@ -147,7 +148,7 @@
     // Constants
     const STORAGE_KEY = 'lmv_tracker';
     const SESSION_TIMEOUT_MS = config.sessionTimeout * 60 * 1000;
-    const UTM_FIELDS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'fbclid', 'gclid'];
+    const UTM_FIELDS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'fbclid', 'gclid', 'fbp'];
     
     // State
     let trackerData = null;
@@ -209,6 +210,20 @@
             
             return data;
         }, {});
+    }
+
+    // Get fbp cookie value from Meta Pixel
+    function getFbpCookie() {
+        return safeExecute(() => {
+            const cookies = document.cookie.split(';');
+            for (const cookie of cookies) {
+                const [name, value] = cookie.trim().split('=');
+                if (name === '_fbp') {
+                    return value;
+                }
+            }
+            return null;
+        }, null);
     }
 
     // Session management
@@ -287,6 +302,22 @@
         if (!config.enablePageViewTracking) return true;
 
         try {
+            // Get fbp cookie value
+            const fbp = getFbpCookie();
+            
+            // Prepare UTM parameters to send to API
+            const utmParams = {};
+            UTM_FIELDS.forEach(field => {
+                if (sessionData[field]) {
+                    utmParams[field] = sessionData[field];
+                }
+            });
+            
+            // Add fbp if available
+            if (fbp) {
+                utmParams.fbp = fbp;
+            }
+
             const response = await fetch(`${config.apiBaseUrl}/sessions`, {
                 method: 'POST',
                 headers: {
@@ -295,7 +326,8 @@
                 },
                 body: JSON.stringify({
                     uuid: sessionData.uuid,
-                    platform: 'web'
+                    platform: 'web',
+                    ...utmParams
                 })
             });
 
@@ -317,6 +349,9 @@
         if (!config.enablePageViewTracking) return true;
 
         try {
+            // Get fbp cookie value for this event
+            const fbp = getFbpCookie();
+            
             const eventData = {
                 uuid: sessionData.uuid,
                 event_type: 'view',
@@ -328,6 +363,8 @@
                 },
                 // UTM parameters as direct properties (not nested in event_data)
                 ...utmParams,
+                // Add fbp if available
+                ...(fbp && { fbp }),
                 ip_address: sessionData.ip_address,
                 user_agent: navigator.userAgent,
                 referrer: document.referrer || null
@@ -383,6 +420,12 @@
                                     url.searchParams.set(param, trackerData[param]);
                                 }
                             });
+                            
+                            // Add fbp if available and not already in URL
+                            const fbp = getFbpCookie();
+                            if (fbp && !url.searchParams.has('fbp')) {
+                                url.searchParams.set('fbp', fbp);
+                            }
                             
                             link.href = url.toString();
                             decoratedCount++;
@@ -460,6 +503,41 @@
                 }
             });
             
+            // Also populate fbp field if available from cookie
+            const fbp = getFbpCookie();
+            if (fbp) {
+                const fbpElements = document.querySelectorAll('#fbp');
+                fbpElements.forEach(element => {
+                    try {
+                        if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
+                            if (element.type === 'hidden' || element.type === 'text' || element.type === '') {
+                                element.value = fbp;
+                                populatedCount++;
+                                logDebug('Populated fbp field from cookie', { 
+                                    elementType: element.tagName, 
+                                    elementId: element.id, 
+                                    value: fbp 
+                                });
+                            }
+                        } else if (element.tagName === 'SELECT') {
+                            const option = Array.from(element.options).find(opt => 
+                                opt.value === fbp || opt.textContent === fbp
+                            );
+                            if (option) {
+                                element.value = option.value;
+                                populatedCount++;
+                                logDebug('Populated fbp select field from cookie', { 
+                                    elementId: element.id, 
+                                    selectedValue: option.value 
+                                });
+                            }
+                        }
+                    } catch (error) {
+                        console.warn('Failed to populate fbp field:', element, error);
+                    }
+                });
+            }
+            
             logDebug(`Populated ${populatedCount} UTM fields`);
             return populatedCount;
         }, 0);
@@ -489,9 +567,13 @@
                             // Check for new UTM form fields
                             if (config.enableFormPopulation) {
                                 const utmFields = node.querySelectorAll ? node.querySelectorAll(UTM_FIELDS.map(field => `#${field}`).join(',')) : [];
-                                if (utmFields.length > 0) {
+                                const fbpFields = node.querySelectorAll ? node.querySelectorAll('#fbp') : [];
+                                if (utmFields.length > 0 || fbpFields.length > 0) {
                                     shouldPopulate = true;
-                                    logDebug('New UTM form fields detected in DOM', { count: utmFields.length });
+                                    logDebug('New UTM form fields detected in DOM', { 
+                                        utmCount: utmFields.length,
+                                        fbpCount: fbpFields.length
+                                    });
                                 }
                             }
                         }
@@ -577,6 +659,13 @@
                 pageViews: trackerData.page_views,
                 path: currentPath
             });
+        }
+
+        // Capture fbp cookie if available and not already stored
+        const fbp = getFbpCookie();
+        if (fbp && !trackerData.fbp) {
+            trackerData.fbp = fbp;
+            logDebug('Captured fbp cookie', { fbp });
         }
 
         // Save data locally
