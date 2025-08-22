@@ -5,6 +5,7 @@
  * comprehensive tracking solution. It handles UTM parameter capture, 
  * link decoration, form field population, session management, and page view tracking.
  * https://cdn.jsdelivr.net/gh/lamainverte/cdn@main/lmv-tracker.js
+ * Purge cache: https://www.jsdelivr.com/tools/purge
  * 
  * FEATURES:
  * - Automatic UTM parameter capture from URL
@@ -29,6 +30,7 @@
  * 
  * ADDITIONAL PARAMETERS:
  * - ref: Referrer parameter (automatically converted to 'referrer' for consistency)
+ *   Priority: ref parameter overrides document.referrer when both are present
  * 
  * SESSION MANAGEMENT:
  * - Creates unique session UUIDs for each user session
@@ -152,7 +154,7 @@
     // Constants
     const STORAGE_KEY = 'lmv_tracker';
     const SESSION_TIMEOUT_MS = config.sessionTimeout * 60 * 1000;
-    const UTM_FIELDS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'fbclid', 'gclid', 'fbp'];
+    const UTM_FIELDS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'fbclid', 'gclid', 'fbp','ref','referrer'];
     
     // State
     let trackerData = null;
@@ -208,12 +210,12 @@
             for (const key of UTM_FIELDS) {
                 const value = params.get(key);
                 if (value && value.trim()) {
-                    // Convert 'ref' to 'referrer' for consistency
                     const finalKey = key === 'ref' ? 'referrer' : key;
                     data[finalKey] = value.trim();
                 }
             }
             
+            logDebug('Extracted UTM parameters from URL', data);
             return data;
         }, {});
     }
@@ -323,6 +325,8 @@
             if (fbp) {
                 utmParams.fbp = fbp;
             }
+            
+            logDebug('Session API payload', { uuid: sessionData.uuid, utmParams });
 
             const response = await fetch(`${config.apiBaseUrl}/sessions`, {
                 method: 'POST',
@@ -373,7 +377,8 @@
                 ...(fbp && { fbp }),
                 ip_address: sessionData.ip_address,
                 user_agent: navigator.userAgent,
-                referrer: document.referrer || null
+                // Handle referrer: prioritize ref parameter over document.referrer
+                referrer: sessionData.referrer || document.referrer || null
             };
 
             const response = await fetch(`${config.apiBaseUrl}/sessions/${sessionData.uuid}/events`, {
@@ -421,15 +426,16 @@
                         if (!url.searchParams.has('uuid')) {
                             url.searchParams.set('uuid', trackerData.uuid);
                             
-                            UTM_FIELDS.forEach(param => {
-                                if (trackerData[param] && !url.searchParams.has(param)) {
-                                    url.searchParams.set(param, trackerData[param]);
+                            { const addedParams = new Set();
+                              UTM_FIELDS.forEach(param => {
+                                const value = trackerData[param];
+                                if (!value) return;
+                                const targetName = (param === 'referrer' || param === 'ref') ? 'ref' : param;
+                                if (!url.searchParams.has(targetName) && !addedParams.has(targetName)) {
+                                    url.searchParams.set(targetName, value);
+                                    addedParams.add(targetName);
                                 }
-                            });
-                            
-                            // Handle ref parameter specifically - use 'ref' in URL but 'referrer' in data
-                            if (trackerData.referrer && !url.searchParams.has('ref')) {
-                                url.searchParams.set('ref', trackerData.referrer);
+                              });
                             }
                             
                             // Add fbp if available and not already in URL
@@ -549,40 +555,6 @@
                 });
             }
             
-            // Handle ref parameter specifically - populate both #ref and #referrer fields
-            if (trackerData.referrer) {
-                const refFields = document.querySelectorAll('#ref, #referrer');
-                refFields.forEach(element => {
-                    try {
-                        if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
-                            if (element.type === 'hidden' || element.type === 'text' || element.type === '') {
-                                element.value = trackerData.referrer;
-                                populatedCount++;
-                                logDebug('Populated ref/referrer field', { 
-                                    elementType: element.tagName, 
-                                    elementId: element.id, 
-                                    value: trackerData.referrer 
-                                });
-                            }
-                        } else if (element.tagName === 'SELECT') {
-                            const option = Array.from(element.options).find(opt => 
-                                opt.value === trackerData.referrer || opt.textContent === trackerData.referrer
-                            );
-                            if (option) {
-                                element.value = option.value;
-                                populatedCount++;
-                                logDebug('Populated ref/referrer select field', { 
-                                    elementId: element.id, 
-                                    selectedValue: option.value 
-                                });
-                            }
-                        }
-                    } catch (error) {
-                        console.warn('Failed to populate ref/referrer field:', element, error);
-                    }
-                });
-            }
-            
             logDebug(`Populated ${populatedCount} UTM fields`);
             return populatedCount;
         }, 0);
@@ -613,13 +585,11 @@
                             if (config.enableFormPopulation) {
                                 const utmFields = node.querySelectorAll ? node.querySelectorAll(UTM_FIELDS.map(field => `#${field}`).join(',')) : [];
                                 const fbpFields = node.querySelectorAll ? node.querySelectorAll('#fbp') : [];
-                                const refFields = node.querySelectorAll ? node.querySelectorAll('#ref, #referrer') : [];
-                                if (utmFields.length > 0 || fbpFields.length > 0 || refFields.length > 0) {
+                                if (utmFields.length > 0 || fbpFields.length > 0) {
                                     shouldPopulate = true;
                                     logDebug('New UTM form fields detected in DOM', { 
                                         utmCount: utmFields.length,
-                                        fbpCount: fbpFields.length,
-                                        refCount: refFields.length
+                                        fbpCount: fbpFields.length
                                     });
                                 }
                             }
@@ -792,21 +762,6 @@
                 }))
             });
         });
-        
-        // Also check for ref/referrer fields specifically
-        const refElements = document.querySelectorAll('#ref, #referrer');
-        if (refElements.length > 0) {
-            console.log('ref/referrer fields:', {
-                count: refElements.length,
-                elements: Array.from(refElements).map(el => ({
-                    tagName: el.tagName,
-                    type: el.type || 'N/A',
-                    value: el.value || 'N/A',
-                    hasValue: !!el.value,
-                    id: el.id
-                }))
-            });
-        }
         
         console.groupEnd();
     }
