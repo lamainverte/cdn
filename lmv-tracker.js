@@ -27,6 +27,9 @@
  * - gclid: Google Ads click identifier
  * - fbp: Facebook browser ID from Meta Pixel
  * 
+ * ADDITIONAL PARAMETERS:
+ * - ref: Referrer parameter (automatically converted to 'referrer' for consistency)
+ * 
  * SESSION MANAGEMENT:
  * - Creates unique session UUIDs for each user session
  * - Sessions expire after 30 minutes of inactivity
@@ -127,7 +130,7 @@
  * - Graceful fallbacks for older browsers
  * - Error handling for missing APIs
  * 
- * @version 3.1.0
+ * @version 3.2.0
  * @author La Main Verte
  */
 
@@ -205,7 +208,9 @@
             for (const key of UTM_FIELDS) {
                 const value = params.get(key);
                 if (value && value.trim()) {
-                    data[key] = value.trim();
+                    // Convert 'ref' to 'referrer' for consistency
+                    const finalKey = key === 'ref' ? 'referrer' : key;
+                    data[finalKey] = value.trim();
                 }
             }
             
@@ -422,6 +427,11 @@
                                 }
                             });
                             
+                            // Handle ref parameter specifically - use 'ref' in URL but 'referrer' in data
+                            if (trackerData.referrer && !url.searchParams.has('ref')) {
+                                url.searchParams.set('ref', trackerData.referrer);
+                            }
+                            
                             // Add fbp if available and not already in URL
                             const fbp = getFbpCookie();
                             if (fbp && !url.searchParams.has('fbp')) {
@@ -539,6 +549,40 @@
                 });
             }
             
+            // Handle ref parameter specifically - populate both #ref and #referrer fields
+            if (trackerData.referrer) {
+                const refFields = document.querySelectorAll('#ref, #referrer');
+                refFields.forEach(element => {
+                    try {
+                        if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
+                            if (element.type === 'hidden' || element.type === 'text' || element.type === '') {
+                                element.value = trackerData.referrer;
+                                populatedCount++;
+                                logDebug('Populated ref/referrer field', { 
+                                    elementType: element.tagName, 
+                                    elementId: element.id, 
+                                    value: trackerData.referrer 
+                                });
+                            }
+                        } else if (element.tagName === 'SELECT') {
+                            const option = Array.from(element.options).find(opt => 
+                                opt.value === trackerData.referrer || opt.textContent === trackerData.referrer
+                            );
+                            if (option) {
+                                element.value = option.value;
+                                populatedCount++;
+                                logDebug('Populated ref/referrer select field', { 
+                                    elementId: element.id, 
+                                    selectedValue: option.value 
+                                });
+                            }
+                        }
+                    } catch (error) {
+                        console.warn('Failed to populate ref/referrer field:', element, error);
+                    }
+                });
+            }
+            
             logDebug(`Populated ${populatedCount} UTM fields`);
             return populatedCount;
         }, 0);
@@ -569,11 +613,13 @@
                             if (config.enableFormPopulation) {
                                 const utmFields = node.querySelectorAll ? node.querySelectorAll(UTM_FIELDS.map(field => `#${field}`).join(',')) : [];
                                 const fbpFields = node.querySelectorAll ? node.querySelectorAll('#fbp') : [];
-                                if (utmFields.length > 0 || fbpFields.length > 0) {
+                                const refFields = node.querySelectorAll ? node.querySelectorAll('#ref, #referrer') : [];
+                                if (utmFields.length > 0 || fbpFields.length > 0 || refFields.length > 0) {
                                     shouldPopulate = true;
                                     logDebug('New UTM form fields detected in DOM', { 
                                         utmCount: utmFields.length,
-                                        fbpCount: fbpFields.length
+                                        fbpCount: fbpFields.length,
+                                        refCount: refFields.length
                                     });
                                 }
                             }
@@ -746,6 +792,22 @@
                 }))
             });
         });
+        
+        // Also check for ref/referrer fields specifically
+        const refElements = document.querySelectorAll('#ref, #referrer');
+        if (refElements.length > 0) {
+            console.log('ref/referrer fields:', {
+                count: refElements.length,
+                elements: Array.from(refElements).map(el => ({
+                    tagName: el.tagName,
+                    type: el.type || 'N/A',
+                    value: el.value || 'N/A',
+                    hasValue: !!el.value,
+                    id: el.id
+                }))
+            });
+        }
+        
         console.groupEnd();
     }
 
